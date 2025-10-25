@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Просмотр — info.jpg</title>
+
+  <!-- Open Graph (если хочешь красивую превью-карту при шаринге) -->
+  <meta property="og:title" content="info.jpg — просмотр" />
+  <meta property="og:description" content="Просмотр изображения info.jpg" />
+  <meta property="og:image" content="info.jpg" />
+  <meta name="twitter:card" content="summary_large_image">
+
+  <style>
+    :root{
+      --bg:#071228;
+      --card:#0b1220;
+      --muted:#9fb2d6;
+      --accent:#6ea8ff;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%; margin:0; background:linear-gradient(180deg,#061226 0%, #071228 100%); color:#e8f2ff; font-family:Inter,ui-sans-serif,system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;}
+    .wrap{
+      min-height:100vh;
+      display:flex;
+      gap:16px;
+      align-items:center;
+      justify-content:center;
+      padding:28px;
+    }
+
+    /* Контейнер просмотра */
+    .viewer {
+      width:min(1100px, 96vw);
+      height:min(88vh, 920px);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius:12px;
+      box-shadow: 0 12px 36px rgba(2,6,23,0.7);
+      overflow:hidden;
+      position:relative;
+      display:flex;
+      flex-direction:column;
+    }
+
+    /* Тулбар сверху */
+    .toolbar{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      justify-content:space-between;
+      padding:10px 12px;
+      border-bottom:1px solid rgba(255,255,255,0.03);
+      background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent);
+    }
+    .controls { display:flex; gap:8px; align-items:center; }
+    .btn {
+      background: rgba(255,255,255,0.03);
+      border:1px solid rgba(255,255,255,0.04);
+      color:inherit;
+      padding:8px 10px;
+      border-radius:8px;
+      cursor:pointer;
+      font-weight:600;
+      display:inline-flex;
+      gap:8px;
+      align-items:center;
+    }
+
+    .viewer-area {
+      flex:1;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background: #081428;
+      position:relative;
+      overflow:hidden;
+      touch-action: none; /* для корректного пинча/перетаскивания */
+    }
+
+    /* Изображение, которое мы зумим/таскаем */
+    .img {
+      will-change: transform;
+      user-select:none;
+      -webkit-user-drag:none;
+      max-width:none; /* управляем размерами через transform */
+      max-height:none;
+      transform-origin: center center;
+      transition: transform 120ms linear;
+      display:block;
+      position:relative;
+      cursor: grab;
+    }
+
+    .footer {
+      padding:10px 12px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      font-size:0.9rem;
+      color:var(--muted);
+      border-top:1px solid rgba(255,255,255,0.02);
+    }
+
+    .hint { font-size:0.86rem; color:var(--muted) }
+
+    /* Стилизуем ссылку скачивания как кнопку */
+    a.btn { text-decoration:none; color:inherit; }
+
+    @media (max-width:720px){
+      .viewer { width:96vw; height:86vh; }
+      .toolbar { padding:8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="viewer" role="main" aria-label="Просмотр изображения">
+      <div class="toolbar">
+        <div class="controls">
+          <button id="zoomOut" class="btn" title="Уменьшить (–)">−</button>
+          <button id="reset" class="btn" title="Сбросить зум/положение">↺ Сброс</button>
+          <button id="zoomIn" class="btn" title="Увеличить (+)">+</button>
+          <button id="fit" class="btn" title="Вписать по размеру">Вписать</button>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center">
+          <a id="download" class="btn" href="info.jpg" download title="Скачать изображение">⬇ Скачать</a>
+          <button id="fullscreen" class="btn" title="Полноэкранный режим">⤢ Полный экран</button>
+        </div>
+      </div>
+
+      <div id="area" class="viewer-area" tabindex="0">
+        <!-- Если нужно — заменить src на абсолютный URL -->
+        <img id="img" class="img" src="info.jpg" alt="info" />
+      </div>
+
+      <div class="footer">
+        <div class="hint">Колесо мыши / пинч — зум. Перетащи — двигается.</div>
+        <div id="meta" style="opacity:0.9">Файл: <strong id="name">info.jpg</strong> — <span id="zoomPct">100%</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Элементы
+    const img = document.getElementById('img');
+    const area = document.getElementById('area');
+    const zoomIn = document.getElementById('zoomIn');
+    const zoomOut = document.getElementById('zoomOut');
+    const reset = document.getElementById('reset');
+    const fit = document.getElementById('fit');
+    const fullscreen = document.getElementById('fullscreen');
+    const nameEl = document.getElementById('name');
+    const zoomPct = document.getElementById('zoomPct');
+
+    // Настройки поведения
+    let scale = 1;
+    const minScale = 0.5;
+    const maxScale = 5;
+    let pos = { x:0, y:0 };       // смещение в px
+    let dragging = false;
+    let dragStart = { x:0, y:0 };
+    let startPos = { x:0, y:0 };
+
+    // Инициализация имени файла
+    function basename(path){ return path.split('/').pop(); }
+    const src = img.getAttribute('src') || 'info.jpg';
+    nameEl.textContent = basename(src);
+
+    // Применить трансформацию
+    function update() {
+      img.style.transform = `translate(${pos.x}px, ${pos.y}px) scale(${scale})`;
+      zoomPct.textContent = Math.round(scale * 100) + '%';
+    }
+
+    // Центрированное вписывание
+    function fitImage(){
+      // подгоняем так, чтобы изображение полностью помещалось в area
+      const areaRect = area.getBoundingClientRect();
+      const naturalW = img.naturalWidth || areaRect.width;
+      const naturalH = img.naturalHeight || areaRect.height;
+      const scaleX = areaRect.width / naturalW;
+      const scaleY = areaRect.height / naturalH;
+      scale = Math.min(scaleX, scaleY, 1);
+      pos.x = 0;
+      pos.y = 0;
+      update();
+    }
+
+    // Сброс состояния
+    function resetView(){
+      scale = 1;
+      pos = { x:0, y:0 };
+      update();
+    }
+
+    // Колесо мыши — зум по позиции курсора
+    area.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = -e.deltaY;
+      const step = 0.12;
+      const oldScale = scale;
+      if (delta > 0) scale = Math.min(maxScale, scale + step);
+      else scale = Math.max(minScale, scale - step);
+
+      // Чтобы зум был относительно курсора — пересчитаем pos
+      const rect = img.getBoundingClientRect();
+      const areaRect = area.getBoundingClientRect();
+      const cx = e.clientX - areaRect.left - areaRect.width/2;
+      const cy = e.clientY - areaRect.top - areaRect.height/2;
+
+      // корректируем смещение (приближённо)
+      pos.x -= cx * (scale/oldScale - 1);
+      pos.y -= cy * (scale/oldScale - 1);
+
+      update();
+    }, { passive:false });
+
+    // Кнопки
+    zoomIn.addEventListener('click', () => { scale = Math.min(maxScale, scale + 0.2); update(); });
+    zoomOut.addEventListener('click', () => { scale = Math.max(minScale, scale - 0.2); update(); });
+    reset.addEventListener('click', resetView);
+    fit.addEventListener('click', fitImage);
+
+    // Перетаскивание мышью
+    img.addEventListener('mousedown', (e) => {
+      dragging = true;
+      img.style.cursor = 'grabbing';
+      dragStart = { x: e.clientX, y: e.clientY };
+      startPos = { ...pos };
+      e.preventDefault();
+    });
+    window.addEventListener('mouseup', () => {
+      dragging = false;
+      img.style.cursor = 'grab';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      pos.x = startPos.x + dx;
+      pos.y = startPos.y + dy;
+      update();
+    });
+
+    // Touch: поддержка перетаскивания и пинч-зума
+    let lastTouchDist = null;
+    let lastTouchCenter = null;
+    area.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        dragging = true;
+        dragStart = { x: t.clientX, y: t.clientY };
+        startPos = { ...pos };
+      } else if (e.touches.length === 2) {
+        dragging = false;
+        lastTouchDist = distanceBetweenTouches(e.touches);
+        lastTouchCenter = centerBetweenTouches(e.touches);
+      }
+    }, { passive:true });
+
+    area.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1 && dragging) {
+        const t = e.touches[0];
+        const dx = t.clientX - dragStart.x;
+        const dy = t.clientY - dragStart.y;
+        pos.x = startPos.x + dx;
+        pos.y = startPos.y + dy;
+        update();
+      } else if (e.touches.length === 2) {
+        const newDist = distanceBetweenTouches(e.touches);
+        const center = centerBetweenTouches(e.touches);
+        if (lastTouchDist) {
+          const oldScale = scale;
+          const factor = newDist / lastTouchDist;
+          scale = Math.max(minScale, Math.min(maxScale, scale * factor));
+
+          // adjust pos so zoom is around touch center
+          const areaRect = area.getBoundingClientRect();
+          const cx = center.x - areaRect.left - areaRect.width/2;
+          const cy = center.y - areaRect.top - areaRect.height/2;
+          pos.x -= cx * (scale/oldScale - 1);
+          pos.y -= cy * (scale/oldScale - 1);
+        }
+        lastTouchDist = newDist;
+        lastTouchCenter = center;
+        update();
+      }
+      e.preventDefault();
+    }, { passive:false });
+
+    area.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) lastTouchDist = null;
+      if (e.touches.length === 0) dragging = false;
+    });
+
+    function distanceBetweenTouches(touches){
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx,dy);
+    }
+    function centerBetweenTouches(touches){
+      return {
+        x: (touches[0].clientX + touches[1].clientX)/2,
+        y: (touches[0].clientY + touches[1].clientY)/2
+      };
+    }
+
+    // Полноэкранный режим
+    fullscreen.addEventListener('click', async () => {
+      try {
+        if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+        else await document.exitFullscreen();
+      } catch (e) { /* ignore */ }
+    });
+
+    // Двойной клик для быстрого зума/сброса
+    area.addEventListener('dblclick', (e) => {
+      if (scale > 1.05) resetView();
+      else {
+        // увеличим и центруем на место клика
+        const oldScale = scale;
+        scale = Math.min(maxScale, 2.2);
+        const rect = area.getBoundingClientRect();
+        const cx = e.clientX - rect.left - rect.width/2;
+        const cy = e.clientY - rect.top - rect.height/2;
+        pos.x -= cx * (scale/oldScale - 1);
+        pos.y -= cy * (scale/oldScale - 1);
+        update();
+      }
+    });
+
+    // Если изображение не загрузилось — показать заглушку
+    img.addEventListener('error', () => {
+      img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600"><rect width="100%" height="100%" fill="#071228"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#8ea6d6" font-family="Arial" font-size="20">Изображение не найдено</text></svg>'
+      );
+      resetView();
+    });
+
+    // Вписать изображение после загрузки его размеров
+    img.addEventListener('load', () => {
+      fitImage();
+    });
+
+    // Клавиши: стрелки — подвигаем картинку, +/- — зум
+    window.addEventListener('keydown', (e) => {
+      if (e.key === '+' || e.key === '=' ) { scale = Math.min(maxScale, scale + 0.12); update(); }
+      if (e.key === '-') { scale = Math.max(minScale, scale - 0.12); update(); }
+      if (e.key === '0') resetView();
+      if (e.key === 'ArrowLeft') { pos.x += 20; update(); }
+      if (e.key === 'ArrowRight') { pos.x -= 20; update(); }
+      if (e.key === 'ArrowUp') { pos.y += 20; update(); }
+      if (e.key === 'ArrowDown') { pos.y -= 20; update(); }
+    });
+
+    // Начальное обновление
+    update();
+  </script>
+</body>
+</html>
